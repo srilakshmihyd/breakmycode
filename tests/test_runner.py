@@ -1,6 +1,11 @@
+from pathlib import Path
+import subprocess
+
+import pytest
+
 from breakmycode.models import TestRunResult as RunResult
 from breakmycode.runner import calculate_test_stats, run_tests
-from breakmycode.runner import _sanitized_test_environment
+from breakmycode.runner import _sanitized_test_environment, run_pytest_once
 
 
 def test_calculates_flaky_failure_rate():
@@ -59,4 +64,21 @@ def test_repeated_runner_stops_when_pytest_collects_no_tests(tmp_path, monkeypat
 
     assert len(results) == 1
     assert len(calls) == 1
+
+
+def test_pytest_collection_errors_are_not_reported_as_zero_tests(tmp_path, monkeypatch):
+    def collection_error(command, cwd, env, **kwargs):
+        Path(env["BREAKMYCODE_RESULTS_FILE"]).write_text("{}", encoding="utf-8")
+        return subprocess.CompletedProcess(
+            command,
+            2,
+            stdout="ERROR collecting tests/test_app.py: missing dependency",
+        )
+
+    monkeypatch.setattr("breakmycode.runner.subprocess.run", collection_error)
+
+    with pytest.raises(RuntimeError, match="pytest could not collect") as error:
+        run_pytest_once(tmp_path)
+
+    assert "missing dependency" in str(error.value)
 

@@ -74,6 +74,20 @@ def run_pytest_once(project: Path, timeout_seconds: int = 300) -> TestRunResult:
             timeout=timeout_seconds,
         )
 
+        # pytest uses exit code 2 for interrupted/collection failures, 3 for
+        # internal errors, and 4 for command-line errors. The result plugin may
+        # still write an empty JSON file for those cases, so inspect the exit
+        # status before treating the run as a project with no tests. Exit code
+        # 1 is a normal test failure and 5 means no tests were collected.
+        if completed.returncode not in {0, 1, 5}:
+            output = completed.stdout.strip()
+            raise RuntimeError(
+                "pytest could not collect or execute the project tests "
+                f"(exit code {completed.returncode}). Run pytest with the same "
+                "Python environment and install the project's dependencies."
+                + (f"\n\n{output}" if output else "")
+            )
+
         if not result_file.exists():
             raise RuntimeError(
                 "pytest did not produce test results. Its output was:\n"

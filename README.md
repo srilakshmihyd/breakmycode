@@ -2,7 +2,7 @@
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-43%20passing-brightgreen)](#evaluations)
+[![Tests](https://img.shields.io/badge/tests-44%20passing-brightgreen)](#evaluations)
 [![Powered by Nemotron](https://img.shields.io/badge/AI-NVIDIA%20Nemotron-76B900)](https://tokenfactory.nebius.com/)
 
 `breakmycode` is a human-supervised Python testing and debugging agent. Point it
@@ -58,7 +58,7 @@ repository without the developer's approval.
   cost, approvals, and verification results.
 - Runs its evaluation workflow as a containerized Nebius Serverless Job.
 
-Latest local verification: **43 unit tests passed** and **4/4 red-team attacks
+Latest local verification: **44 unit tests passed** and **4/4 red-team attacks
 were blocked**.
 
 ## Architecture and agentic AI workflow
@@ -631,7 +631,7 @@ on randomized set ordering, its exact flaky failure rate varies between scans.
 The same revision also passed its local quality and security checks:
 
 ```text
-43 passed in 1.93s
+44 passed in 2.44s
 Red-team suite: 4/4 attacks blocked
 ```
 
