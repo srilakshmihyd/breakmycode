@@ -61,41 +61,150 @@ repository without the developer's approval.
 Latest local verification: **35 unit tests passed** and **4/4 red-team attacks
 were blocked**.
 
-## Failure-analysis lifecycle
+## Architecture and agentic AI workflow
 
-The workflow is implemented as a LangGraph state machine:
-
-```text
-validate → test → analyze → security review → approval → verify → report
-```
-
-Conditional edges skip AI work when tests pass and skip verification when no
-patch is approved. Each scan has a stable ID and every graph node, pytest run,
-model request, security decision, approval, and verification result is recorded
-as an auditable trace.
+`breakmycode` separates reasoning from execution. Nemotron can classify a
+failure and propose a diff, but it cannot run commands, write files, approve its
+own patch, or merge code. Python components own pytest execution, deterministic
+policy enforcement, Git operations, and audit logging.
 
 ```mermaid
-flowchart LR
-    A[Validate project] --> B[Run pytest N times]
-    B --> C[Detect flaky and failing tests]
-    C -->|Failures| D[Collect bounded source context]
-    C -->|All pass| I[Report]
-    D --> E[Nemotron diagnosis and diff]
-    E --> F[Security and adversarial review]
-    F -->|Safe| G{Developer approves?}
-    F -->|Blocked| I
-    G -->|No| I
-    G -->|Yes| H[Create Git branch and apply]
-    H --> J[Fresh verification runs]
-    J --> I
+flowchart TB
+    U[Developer / CLI] --> C{Selected workflow}
+
+    C -->|scan| G[LangGraph DebugAgent]
+    C -->|generate-tests| TG[TestGenerationWorkflow]
+
+    G --> R[Isolated pytest subprocess runner]
+    TG --> R
+    R --> X[Outcomes, tracebacks, failure rates]
+
+    G --> CTX[Bounded context builder]
+    TG --> CTX
+    CTX --> MR[Cost-aware model router]
+    X --> MR
+
+    MR --> TF[Nebius Token Factory API]
+    TF -->|Fast| N1[Nemotron classification]
+    TF -->|Standard| N2[Explanation, tests, diff, review]
+    TF -->|Reasoning| N3[Low-confidence diagnosis]
+    N1 --> P[Proposed structured result or unified diff]
+    N2 --> P
+    N3 --> P
+    P --> S[Deterministic security policy]
+    S --> AR[Adversarial model review]
+    AR --> H{Explicit human approval?}
+    H -->|No| O[Report only; no files changed]
+    H -->|Yes| B[Create breakmycode/fixes-* branch]
+    B --> A[Apply validated patch]
+    A --> V[Fresh pytest verification]
+    V --> O
+
+    G -. events .-> DB[(Local SQLite trace)]
+    TG -. events .-> DB
+    R -. results .-> DB
+    TF -. model usage .-> DB
+    H -. decision .-> DB
 ```
 
-Test generation uses a separate guarded lifecycle:
+### Failure-analysis agent
+
+The debugging workflow in `breakmycode/agent.py` is a LangGraph state machine:
 
 ```text
-inspect source → baseline pytest → generate tests → security review
-→ approval → new Git branch → pytest verification
+validate → test → analyze → security_review → approval → verify → report
 ```
+
+Its shared graph state carries the scan ID, pytest results, aggregated failure
+rates, model analyses, security findings, approval outcome, branch name, and
+verification result.
+
+1. **Validate:** Resolve the project, validate run settings, and record the
+   current Git branch.
+2. **Observe:** Run pytest N times in fresh subprocesses with randomized Python
+   hash seeds. Record pass/fail outcomes by pytest node ID.
+3. **Detect:** A test is flaky only when it both passes and fails across runs on
+   unchanged code. Always-failing tests are tracked separately.
+4. **Build context:** Parse the failing test's imports and collect bounded test
+   source, likely production code, and the first failure traceback. Secrets are
+   redacted and `.env` is never collected.
+5. **Reason:** Ask a fast Nemotron model whether the code is wrong, the test is
+   wrong, or the evidence is uncertain. Low-confidence diagnoses can be routed
+   to the reasoning model.
+6. **Propose:** For a production-code bug, ask the standard model for the
+   smallest unified diff. The model returns text only; it has no filesystem or
+   shell access.
+7. **Guard:** Run deterministic diff policy followed by an adversarial model
+   review. Unsafe patches stop here.
+8. **Authorize:** Print the complete diff and request `Apply this patch? [y/N]`.
+   Only an exact `y` continues.
+9. **Act:** Create a new `breakmycode/fixes-*` branch and apply the validated
+   diff. The tool never commits, pushes, or merges it.
+10. **Verify:** Repeat pytest, compare before/after failure rates, and flag new
+    regressions.
+11. **Report:** Print the outcome and persist an auditable local trace.
+
+LangGraph conditional edges skip model analysis when every test passes and skip
+verification when no patch was approved.
+
+### Test-generation agent
+
+Test generation is a separate guarded workflow in `breakmycode/generator.py`:
+
+```text
+inspect → baseline pytest → generate → security_review
+→ approval → branch/apply → pytest verification
+```
+
+It collects bounded production and existing-test context, asks Nemotron for
+missing edge-case coverage, and accepts only diffs that create brand-new
+`test_*.py` files. It rejects production edits, existing-test modifications,
+secret or environment access, network calls, subprocess execution, and
+destructive file operations. Approved tests are applied on a new branch and
+must pass a fresh pytest run without introducing new failures.
+
+### Model routing
+
+| Model role | Agent task |
+| --- | --- |
+| Fast / Nano or Lightning | Initial failure classification and routine decisions |
+| Standard / Super | Plain-English explanations, test generation, unified diffs, and adversarial review |
+| Reasoning / Ultra | Uncertain or low-confidence root-cause analysis |
+
+All roles use the OpenAI-compatible Nebius Token Factory endpoint. If separate
+role IDs are not configured, they fall back to `NEBIUS_MODEL`.
+
+### Trust and safety boundaries
+
+- Repository content, comments, filenames, tracebacks, and model output are
+  treated as untrusted input.
+- Source context is size-bounded and credential-like values are redacted before
+  model calls.
+- Pytest subprocesses do not inherit API keys, tokens, passwords, or common
+  cloud credential variables.
+- Deterministic policy—not the model—decides whether a diff is eligible for
+  approval.
+- The developer remains the only authority that can approve a filesystem
+  change.
+- Every node, model call, policy decision, approval, and verification result is
+  tied to a stable scan ID in the local trace database.
+
+### Main components
+
+| Component | Responsibility |
+| --- | --- |
+| `cli.py` | Command parsing and workflow selection |
+| `agent.py` | LangGraph debugging state machine |
+| `generator.py` | Human-approved pytest generation workflow |
+| `runner.py` | Sanitized pytest subprocess execution and result aggregation |
+| `context.py` | Bounded source discovery and import-based failure context |
+| `llm.py` | Token Factory requests, structured diagnoses, diffs, and reviews |
+| `model_router.py` | Fast, standard, and reasoning model selection |
+| `security.py` | Deterministic code-patch and generated-test policies |
+| `patches.py` | Approval gate, Git branch creation, and diff application |
+| `observability.py` | SQLite events, model usage, latency, cost, and history |
+| `evals.py` | Ground-truth quality metrics and executable patch verification |
+| `serverless.py` | Sanitized project packaging for asynchronous workers |
 
 ## Install
 
