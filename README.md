@@ -5,13 +5,45 @@
 [![Tests](https://img.shields.io/badge/tests-35%20passing-brightgreen)](#evaluations)
 [![Powered by Nemotron](https://img.shields.io/badge/AI-NVIDIA%20Nemotron-76B900)](https://tokenfactory.nebius.com/)
 
-`breakmycode` is a human-supervised debugging agent for Python projects. It runs
-pytest repeatedly, detects flaky tests, uses Nemotron through Nebius Token
-Factory to diagnose failures and propose patches, red-teams every patch, asks
-for approval, applies approved changes on a new Git branch, and verifies the
-result with fresh test runs.
+`breakmycode` is a human-supervised Python testing and debugging agent. Point it
+at an existing local Python project and it can generate additional pytest tests,
+run the suite repeatedly to expose flaky behavior, explain failures with NVIDIA
+Nemotron through Nebius Token Factory, and propose a verified fix.
 
-It never applies a patch without an explicit `y` response.
+Every generated-test or code-fix diff is printed first. Nothing is written
+without an explicit `y`, and approved changes are isolated on a new Git branch.
+
+```bash
+# Generate additional tests for an existing project
+breakmycode generate-tests /path/to/project
+
+# Find flaky/failing tests and propose fixes
+breakmycode /path/to/project --runs 20
+```
+
+## What this repository does
+
+`breakmycode` provides two connected workflows:
+
+| Workflow | Command | Result |
+| --- | --- | --- |
+| Test generation | `breakmycode generate-tests <folder>` | Nemotron proposes new pytest files, security policy reviews them, the user approves them, and pytest verifies them. |
+| Failure investigation | `breakmycode <folder> --runs 20` | Pytest runs repeatedly, flaky and persistent failures are diagnosed, and safe code fixes are proposed and verified. |
+
+An end-to-end use on a real repository looks like this:
+
+1. Clone a public or private Python repository locally.
+2. Install that project's dependencies and `breakmycode` in the same virtual
+   environment.
+3. Generate missing edge-case tests and review the proposed test diff.
+4. Run the test suite repeatedly to detect intermittent failures.
+5. Let Nemotron compare the test, production code, and failure output.
+6. Review the explanation and unified diff.
+7. Approve with `y` or decline with Enter/`n`.
+8. If approved, verify the change on a new `breakmycode/fixes-*` branch.
+
+The project does not publish secrets, push branches, merge code, or modify a
+repository without the developer's approval.
 
 ## Highlights
 
@@ -29,7 +61,7 @@ It never applies a patch without an explicit `y` response.
 Latest local verification: **35 unit tests passed** and **4/4 red-team attacks
 were blocked**.
 
-## Agent lifecycle
+## Failure-analysis lifecycle
 
 The workflow is implemented as a LangGraph state machine:
 
@@ -56,6 +88,13 @@ flowchart LR
     G -->|Yes| H[Create Git branch and apply]
     H --> J[Fresh verification runs]
     J --> I
+```
+
+Test generation uses a separate guarded lifecycle:
+
+```text
+inspect source → baseline pytest → generate tests → security review
+→ approval → new Git branch → pytest verification
 ```
 
 ## Install
