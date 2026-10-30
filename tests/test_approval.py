@@ -99,3 +99,20 @@ def test_agent_verifies_an_approved_patch(tmp_path, monkeypatch):
     assert state["branch"] == "breakmycode/fixes-test"
     agent.patch_applier.apply.assert_called_once()
 
+
+def test_agent_explains_when_pytest_collects_no_tests(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "breakmycode.agent.run_tests",
+        lambda project, runs, on_progress, timeout_seconds: [RunResult({})],
+    )
+    agent = DebugAgent(
+        tmp_path,
+        20,
+        None,
+        EventStore(tmp_path / "history.db"),
+        print_fn=Mock(),
+    )
+
+    with pytest.raises(ValueError, match="pytest collected no tests"):
+        agent.run()
+

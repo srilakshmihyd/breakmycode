@@ -105,6 +105,10 @@ def run_tests(
         results.append(result)
         if on_progress:
             on_progress(run_number, runs, result)
+        # Repeating pytest cannot discover tests that were not present on the
+        # first identical run. Stop early so callers can report the real issue.
+        if not result.outcomes:
+            break
     return results
 
 

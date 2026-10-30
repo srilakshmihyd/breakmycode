@@ -157,6 +157,11 @@ class DebugAgent:
                 ),
                 timeout_seconds=self.timeout_seconds,
             )
+            if not results or not any(result.outcomes for result in results):
+                raise ValueError(
+                    "pytest collected no tests. Add pytest tests or run "
+                    "`breakmycode generate-tests <project_folder>` first."
+                )
             stats = calculate_test_stats(results, self.runs)
             flaky = [item.test_name for item in stats.values() if item.is_flaky]
             self.store.emit(

@@ -131,3 +131,22 @@ def test_generated_tests_are_bounded(tmp_path):
     assert report.safe is False
     assert "generated_test_count" in {item.rule for item in report.findings}
 
+
+def test_generated_tests_allow_a_small_multi_function_suite(tmp_path):
+    diff = """--- /dev/null
++++ b/tests/test_generated_radius.py
+@@ -0,0 +1,7 @@
++import pytest
++
++def test_valid_radius():
++    assert 150 == 150
++
++def test_invalid_radius():
++    with pytest.raises(ValueError):
++        int("invalid")
+"""
+
+    report = review_test_patch(tmp_path, diff)
+
+    assert "generated_test_count" not in {item.rule for item in report.findings}
+

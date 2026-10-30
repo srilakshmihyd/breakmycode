@@ -1,5 +1,5 @@
 from breakmycode.models import TestRunResult as RunResult
-from breakmycode.runner import calculate_test_stats
+from breakmycode.runner import calculate_test_stats, run_tests
 from breakmycode.runner import _sanitized_test_environment
 
 
@@ -44,4 +44,19 @@ def test_pytest_environment_does_not_inherit_secrets(monkeypatch):
     assert "GITHUB_TOKEN" not in environment
     assert "AWS_ACCESS_KEY_ID" not in environment
     assert environment["BREAKMYCODE_SAFE_VALUE"] == "visible"
+
+
+def test_repeated_runner_stops_when_pytest_collects_no_tests(tmp_path, monkeypatch):
+    calls = []
+
+    def no_tests(project, timeout_seconds):
+        calls.append((project, timeout_seconds))
+        return RunResult({}, pytest_output="no tests ran")
+
+    monkeypatch.setattr("breakmycode.runner.run_pytest_once", no_tests)
+
+    results = run_tests(tmp_path, 20)
+
+    assert len(results) == 1
+    assert len(calls) == 1
 

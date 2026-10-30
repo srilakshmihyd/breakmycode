@@ -2,7 +2,7 @@
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-40%20passing-brightgreen)](#evaluations)
+[![Tests](https://img.shields.io/badge/tests-43%20passing-brightgreen)](#evaluations)
 [![Powered by Nemotron](https://img.shields.io/badge/AI-NVIDIA%20Nemotron-76B900)](https://tokenfactory.nebius.com/)
 
 `breakmycode` is a human-supervised Python testing and debugging agent. Point it
@@ -58,7 +58,7 @@ repository without the developer's approval.
   cost, approvals, and verification results.
 - Runs its evaluation workflow as a containerized Nebius Serverless Job.
 
-Latest local verification: **40 unit tests passed** and **4/4 red-team attacks
+Latest local verification: **43 unit tests passed** and **4/4 red-team attacks
 were blocked**.
 
 ## Architecture and agentic AI workflow
@@ -293,7 +293,8 @@ The generation workflow:
    credentials, virtual environments, caches, build output, and symlinks.
 2. Runs the current pytest suite once to establish a baseline.
 3. Asks Nemotron for deterministic, high-value edge-case tests.
-4. Accepts only diffs that add brand-new `test_*.py` files.
+4. Accepts only diffs that add one brand-new `test_*.py` file containing one
+   to five focused test functions and no more than 80 lines.
 5. Blocks production changes, existing-test edits, environment access, network
    calls, subprocesses, shell execution, and destructive file operations.
 6. Applies the candidate only inside a temporary copy and runs the full pytest
@@ -306,6 +307,11 @@ The generation workflow:
 The generator never silently writes tests and never lets generated tests modify
 application code. If verification fails, the changes remain isolated on the new
 branch for human review.
+
+If a project currently has no pytest tests, start with `generate-tests`. A normal
+`breakmycode <folder> --runs N` scan now stops after its first empty collection
+and explains that tests must be generated or added; it does not repeat an empty
+pytest run N times.
 
 For a public GitHub repository, clone it first:
 
@@ -625,7 +631,7 @@ on randomized set ordering, its exact flaky failure rate varies between scans.
 The same revision also passed its local quality and security checks:
 
 ```text
-40 passed in 1.72s
+43 passed in 1.93s
 Red-team suite: 4/4 attacks blocked
 ```
 

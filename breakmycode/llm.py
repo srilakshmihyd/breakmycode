@@ -164,9 +164,9 @@ Return only JSON with:
         )
         prompt = f"""Generate one focused pytest file for the supplied Python project.
 Choose one deterministic public function from the source and cover its most valuable edge
-cases. Prefer one parametrized test. Do not duplicate existing tests and do not invent APIs
-that are absent from the source. Create exactly one test function, keep the complete file
-below 80 lines, and use a brand-new `test_*.py` path.
+cases. Prefer parametrization where it keeps the tests clear. Do not duplicate existing tests
+and do not invent APIs that are absent from the source. Create between one and five focused
+test functions, keep the complete file below 80 lines, and use a brand-new `test_*.py` path.
 
 Do not modify production code or existing tests. Do not read environment variables,
 credentials, network resources, or files outside the project. Do not execute subprocesses,

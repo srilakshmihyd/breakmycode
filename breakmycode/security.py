@@ -249,12 +249,12 @@ def review_test_patch(project: Path, diff: str) -> SecurityReport:
             )
         )
     test_count = len(re.findall(r"(?m)^\s*def\s+test_", added_source))
-    if test_count != 1:
+    if not 1 <= test_count <= 5:
         findings.append(
             SecurityFinding(
                 "high",
                 "generated_test_count",
-                "Generated pytest file must contain exactly one test function.",
+                "Generated pytest file must contain between one and five test functions.",
             )
         )
     for rule, pattern in UNSAFE_GENERATED_TEST_PATTERNS.items():
