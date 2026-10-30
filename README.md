@@ -2,7 +2,7 @@
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-27%20passing-brightgreen)](#evaluations)
+[![Tests](https://img.shields.io/badge/tests-35%20passing-brightgreen)](#evaluations)
 [![Powered by Nemotron](https://img.shields.io/badge/AI-NVIDIA%20Nemotron-76B900)](https://tokenfactory.nebius.com/)
 
 `breakmycode` is a human-supervised debugging agent for Python projects. It runs
@@ -16,6 +16,7 @@ It never applies a patch without an explicit `y` response.
 ## Highlights
 
 - Detects intermittent failures by running the same pytest suite repeatedly.
+- Generates additional pytest coverage as a separately approved workflow.
 - Distinguishes production-code bugs from incorrect test expectations.
 - Routes routine and complex work across Nemotron models to balance speed, cost,
   and reasoning quality.
@@ -25,7 +26,7 @@ It never applies a patch without an explicit `y` response.
   cost, approvals, and verification results.
 - Runs its evaluation workflow as a containerized Nebius Serverless Job.
 
-Latest local verification: **27 unit tests passed** and **4/4 red-team attacks
+Latest local verification: **35 unit tests passed** and **4/4 red-team attacks
 were blocked**.
 
 ## Agent lifecycle
@@ -126,6 +127,48 @@ For an approved patch, the agent:
 3. Applies the patch.
 4. Runs the suite repeatedly again.
 5. Compares before-and-after failure rates and detects new regressions.
+
+## Generate additional tests
+
+Point the generator at any locally cloned Python project whose dependencies are
+installed in the active environment:
+
+```bash
+breakmycode generate-tests /path/to/project
+```
+
+The generation workflow:
+
+1. Collects bounded production-code and existing-test context while excluding
+   credentials, virtual environments, caches, build output, and symlinks.
+2. Runs the current pytest suite once to establish a baseline.
+3. Asks Nemotron for deterministic, high-value edge-case tests.
+4. Accepts only diffs that add brand-new `test_*.py` files.
+5. Blocks production changes, existing-test edits, environment access, network
+   calls, subprocesses, shell execution, and destructive file operations.
+6. Prints the complete diff and asks `Apply this patch? [y/N]`.
+7. On an explicit `y`, creates a new `breakmycode/fixes-*` Git branch, applies
+   the tests, and runs pytest again.
+
+The generator never silently writes tests and never lets generated tests modify
+application code. If verification fails, the changes remain isolated on the new
+branch for human review.
+
+For a public GitHub repository, clone it first:
+
+```bash
+git clone https://github.com/OWNER/REPOSITORY.git
+cd REPOSITORY
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e /path/to/breakmycode
+breakmycode generate-tests .
+breakmycode . --runs 20
+```
+
+Only run third-party projects you trust: installing dependencies and executing
+pytest runs repository code on your machine.
 
 ## Observability and tracing
 
@@ -313,10 +356,11 @@ breakmycode scan ./demo_repo --runs 20
 
 ## Current scope
 
-This version scans locally available Python projects that use pytest. A private
-GitHub repository should be cloned by the user first and then passed as a local
-folder. Direct GitHub ingestion, a web UI, and test generation are intentionally
-outside this release's scope.
+This version scans locally available Python projects that use pytest and can
+generate additional pytest files through a human-approved workflow. A public or
+private GitHub repository should be cloned by the user first and then passed as
+a local folder. Direct URL ingestion and a web UI are outside this release's
+scope.
 
 ## License
 

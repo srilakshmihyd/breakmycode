@@ -56,3 +56,22 @@ def test_model_diff_hunk_counts_are_normalized():
 
     assert "@@ -1,3 +1,3 @@" in normalized
 
+
+def test_mocked_llm_generates_new_pytest_file():
+    client = Mock()
+    client.chat.completions.create.return_value = _response(
+        "--- /dev/null\n+++ b/tests/test_generated_cart.py\n"
+        "@@ -0,0 +1,2 @@\n+def test_total():\n+    assert 1 + 1 == 2\n"
+    )
+    analyzer = LLMAnalyzer(client=client, model="mock-model")
+
+    diff = analyzer.generate_tests(
+        "### cart.py\ndef total(items): return sum(items)",
+        "(no existing pytest files found)",
+    )
+
+    assert "+++ b/tests/test_generated_cart.py" in diff
+    prompt = client.chat.completions.create.call_args.kwargs["messages"][1]["content"]
+    assert "brand-new Python files" in prompt
+    assert "def total" in prompt
+

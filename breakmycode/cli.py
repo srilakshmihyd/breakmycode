@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 from .agent import DebugAgent
 from .evals import run_evaluation
+from .generator import TestGenerationWorkflow
 from .llm import LLMAnalyzer
 from .observability import EventStore
 from .redteam import run_red_team
@@ -21,6 +22,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="breakmycode",
         description="Agentically find, explain, and safely repair flaky pytest tests.",
+        epilog=(
+            "Other commands: generate-tests, history, show, metrics, export-trace, "
+            "red-team, eval, package-job, cleanup"
+        ),
     )
     parser.add_argument("project_folder", type=Path)
     parser.add_argument("--runs", type=int, default=20)
@@ -54,6 +59,8 @@ def main(argv: list[str] | None = None) -> int:
         return _export_trace(store, arguments[1:])
     if arguments and arguments[0] == "cleanup":
         return _cleanup(store, arguments[1:])
+    if arguments and arguments[0] == "generate-tests":
+        return _generate_tests(store, arguments[1:])
     if arguments and arguments[0] == "scan":
         arguments = arguments[1:]
 
@@ -237,6 +244,47 @@ def _cleanup(store: EventStore, argv: list[str]) -> int:
         return 2
     print(f"Deleted {deleted} scans older than {args.days} days.")
     return 0
+
+
+def _generate_tests(store: EventStore, argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="breakmycode generate-tests",
+        description=(
+            "Generate additional pytest tests, review them, and apply only after approval."
+        ),
+    )
+    parser.add_argument("project_folder", type=Path)
+    parser.add_argument("--timeout", type=int, default=300, help="seconds per pytest run")
+    parser.add_argument(
+        "--no-ai-security-review",
+        action="store_true",
+        help="use deterministic test policy checks without the additional AI review",
+    )
+    args = parser.parse_args(argv)
+    project = args.project_folder.expanduser().resolve()
+    if not project.is_dir():
+        print(f"error: project folder does not exist: {project}", file=sys.stderr)
+        return 2
+    if args.timeout < 1:
+        print("error: --timeout must be at least 1", file=sys.stderr)
+        return 2
+    if not os.environ.get("NEBIUS_API_KEY"):
+        print("error: NEBIUS_API_KEY is required for test generation", file=sys.stderr)
+        return 1
+
+    workflow = TestGenerationWorkflow(
+        project,
+        LLMAnalyzer(telemetry=store),
+        store,
+        ai_security_review=not args.no_ai_security_review,
+        timeout_seconds=args.timeout,
+    )
+    try:
+        result = workflow.run()
+    except Exception as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    return 0 if result["status"] == "completed" else 1
 
 
 def _scan_payload(scan: dict) -> dict:

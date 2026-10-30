@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 import subprocess
 
-from .security import repair_unified_diff, review_patch
+from .security import repair_unified_diff, review_patch, review_test_patch
 
 
 InputFunction = Callable[[str], str]
@@ -25,11 +25,16 @@ class PatchApplier:
         self.project = project.resolve()
         self.branch_name: str | None = None
 
-    def apply(self, diff: str) -> str:
+    def apply(self, diff: str, *, patch_kind: str = "code") -> str:
         if not diff.strip():
             raise PatchError("The model returned an empty patch.")
         diff = repair_unified_diff(self.project, diff)
-        report = review_patch(self.project, diff)
+        if patch_kind == "code":
+            report = review_patch(self.project, diff)
+        elif patch_kind == "tests":
+            report = review_test_patch(self.project, diff)
+        else:
+            raise PatchError(f"Unknown patch kind: {patch_kind}")
         if not report.safe:
             messages = "; ".join(item.message for item in report.findings)
             raise PatchError(f"Security review rejected patch: {messages}")

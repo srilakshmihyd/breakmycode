@@ -1,4 +1,4 @@
-"""breakmycode: find, explain, and propose fixes for flaky pytest tests."""
+"""breakmycode: generate tests and safely diagnose flaky pytest failures."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 

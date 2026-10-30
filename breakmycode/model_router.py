@@ -27,7 +27,7 @@ class ModelRouter:
     def for_task(self, task: str, confidence: float = 1.0) -> str:
         if task in {"deep_diagnosis", "complex_review"} or confidence < 0.65:
             return self.reasoning
-        if task in {"patch", "review"}:
+        if task in {"patch", "review", "test_generation"}:
             return self.standard
         return self.fast
 

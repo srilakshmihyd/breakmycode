@@ -11,6 +11,7 @@ def test_model_router_uses_role_specific_environment(monkeypatch):
 
     assert router.for_task("classification") == "nano"
     assert router.for_task("patch") == "super"
+    assert router.for_task("test_generation") == "super"
     assert router.for_task("deep_diagnosis") == "ultra"
     assert router.for_task("classification", confidence=0.2) == "ultra"
 

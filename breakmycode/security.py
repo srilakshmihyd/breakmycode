@@ -12,6 +12,20 @@ SECRET_PATTERN = re.compile(
     r"(?i)((?:api[_-]?key|authorization|token|secret|password)\s*[:=]\s*)"
     r"([^\s,;]+)"
 )
+UNSAFE_GENERATED_TEST_PATTERNS = {
+    "shell_execution": re.compile(r"\bshell\s*=\s*True\b|\bos\.system\s*\("),
+    "dynamic_execution": re.compile(r"\b(?:eval|exec)\s*\("),
+    "process_execution": re.compile(r"\bsubprocess\s*\."),
+    "destructive_io": re.compile(
+        r"\b(?:shutil\.rmtree|os\.remove|os\.unlink|Path\([^\n]*\)\.unlink)\s*\("
+    ),
+    "network_access": re.compile(
+        r"\b(?:requests|httpx|socket|urllib\.request|boto3)\s*\."
+    ),
+    "environment_access": re.compile(
+        r"\b(?:os\.environ|os\.getenv|load_dotenv|dotenv_values)\b"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -119,6 +133,152 @@ def review_patch(project: Path, diff: str) -> SecurityReport:
             )
         )
     return SecurityReport(tuple(findings))
+
+
+def review_test_patch(project: Path, diff: str) -> SecurityReport:
+    """Allow only new, local pytest files with no dangerous side effects."""
+    findings: list[SecurityFinding] = []
+    project = project.resolve()
+    if not diff.strip():
+        return SecurityReport(
+            (SecurityFinding("high", "empty_patch", "Patch is empty."),)
+        )
+    if len(diff) > MAX_PATCH_CHARS:
+        findings.append(
+            SecurityFinding("high", "patch_size", "Patch exceeds the size limit.")
+        )
+    if "GIT binary patch" in diff:
+        findings.append(
+            SecurityFinding("high", "binary_patch", "Binary patches are not allowed.")
+        )
+
+    pairs = _diff_path_pairs(diff)
+    if not pairs:
+        findings.append(
+            SecurityFinding("high", "invalid_diff", "No unified-diff file headers found.")
+        )
+    for old_path, new_path in pairs:
+        if old_path != "/dev/null":
+            findings.append(
+                SecurityFinding(
+                    "high",
+                    "existing_test_modification",
+                    f"Generated tests must be new files; patch modifies {old_path}.",
+                )
+            )
+        normalized = _normalized_diff_path(new_path)
+        path = PurePosixPath(normalized)
+        if new_path == "/dev/null" or path.is_absolute() or ".." in path.parts:
+            findings.append(
+                SecurityFinding(
+                    "high", "path_escape", f"Invalid generated-test path: {new_path}"
+                )
+            )
+            continue
+        if PROTECTED_PARTS.intersection(path.parts):
+            findings.append(
+                SecurityFinding(
+                    "high", "protected_file", f"Patch targets protected path: {normalized}"
+                )
+            )
+        is_test = (
+            path.suffix == ".py"
+            and path.name.startswith("test_")
+            and ("tests" in path.parts or len(path.parts) == 1)
+        )
+        if not is_test:
+            findings.append(
+                SecurityFinding(
+                    "high",
+                    "non_test_file",
+                    f"Test generation may only add test_*.py files: {normalized}",
+                )
+            )
+        candidate = project / Path(*path.parts)
+        if candidate.exists():
+            findings.append(
+                SecurityFinding(
+                    "high",
+                    "existing_test_modification",
+                    f"Generated tests may not overwrite an existing file: {normalized}",
+                )
+            )
+        try:
+            candidate.resolve().relative_to(project)
+        except (OSError, ValueError):
+            findings.append(
+                SecurityFinding(
+                    "high", "symlink_escape", f"Path resolves outside project: {normalized}"
+                )
+            )
+
+    removed_content = [
+        line
+        for line in diff.splitlines()
+        if line.startswith("-") and not line.startswith("--- ")
+    ]
+    if removed_content:
+        findings.append(
+            SecurityFinding(
+                "high",
+                "removed_content",
+                "Test-generation patches may not remove existing content.",
+            )
+        )
+
+    added_source = "\n".join(
+        line[1:]
+        for line in diff.splitlines()
+        if line.startswith("+") and not line.startswith("+++ ")
+    )
+    if not re.search(r"\bassert\b|pytest\.raises\s*\(", added_source):
+        findings.append(
+            SecurityFinding(
+                "high",
+                "no_assertions",
+                "Generated pytest files must contain assertions or pytest.raises checks.",
+            )
+        )
+    for rule, pattern in UNSAFE_GENERATED_TEST_PATTERNS.items():
+        if pattern.search(added_source):
+            findings.append(
+                SecurityFinding(
+                    "high",
+                    rule,
+                    f"Generated tests contain blocked behavior: {rule}.",
+                )
+            )
+    return SecurityReport(tuple(findings))
+
+
+def generated_test_paths(diff: str) -> tuple[str, ...]:
+    """Return normalized new test paths from a unified diff."""
+    return tuple(
+        _normalized_diff_path(new_path)
+        for _, new_path in _diff_path_pairs(diff)
+        if new_path != "/dev/null"
+    )
+
+
+def _diff_path_pairs(diff: str) -> list[tuple[str, str]]:
+    lines = diff.splitlines()
+    pairs: list[tuple[str, str]] = []
+    for index, line in enumerate(lines):
+        if not line.startswith("--- ") or index + 1 >= len(lines):
+            continue
+        next_line = lines[index + 1]
+        if not next_line.startswith("+++ "):
+            continue
+        old_path = line[4:].split("\t", 1)[0].strip()
+        new_path = next_line[4:].split("\t", 1)[0].strip()
+        pairs.append((old_path, new_path))
+    return pairs
+
+
+def _normalized_diff_path(raw_path: str) -> str:
+    if raw_path.startswith(("a/", "b/")):
+        return raw_path[2:]
+    return raw_path
 
 
 def repair_unified_diff(project: Path, diff: str) -> str:
