@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 import re
@@ -239,6 +240,23 @@ def review_test_patch(project: Path, diff: str) -> SecurityReport:
                 "Generated pytest files must contain assertions or pytest.raises checks.",
             )
         )
+    if len(added_source.splitlines()) > 80:
+        findings.append(
+            SecurityFinding(
+                "high",
+                "generated_test_size",
+                "Generated pytest file exceeds the 80-line limit.",
+            )
+        )
+    test_count = len(re.findall(r"(?m)^\s*def\s+test_", added_source))
+    if test_count != 1:
+        findings.append(
+            SecurityFinding(
+                "high",
+                "generated_test_count",
+                "Generated pytest file must contain exactly one test function.",
+            )
+        )
     for rule, pattern in UNSAFE_GENERATED_TEST_PATTERNS.items():
         if pattern.search(added_source):
             findings.append(
@@ -246,6 +264,28 @@ def review_test_patch(project: Path, diff: str) -> SecurityReport:
                     "high",
                     rule,
                     f"Generated tests contain blocked behavior: {rule}.",
+                )
+            )
+    file_sources = _new_file_sources(diff)
+    if len(file_sources) != len(pairs) or any(
+        not source.strip() for _, source in file_sources
+    ):
+        findings.append(
+            SecurityFinding(
+                "high",
+                "invalid_diff",
+                "Each generated test file must contain a valid unified-diff hunk.",
+            )
+        )
+    for path, source in file_sources:
+        try:
+            ast.parse(source, filename=path)
+        except SyntaxError as exc:
+            findings.append(
+                SecurityFinding(
+                    "high",
+                    "invalid_python",
+                    f"Generated test is not valid Python ({path}:{exc.lineno}).",
                 )
             )
     return SecurityReport(tuple(findings))
@@ -279,6 +319,45 @@ def _normalized_diff_path(raw_path: str) -> str:
     if raw_path.startswith(("a/", "b/")):
         return raw_path[2:]
     return raw_path
+
+
+def _new_file_sources(diff: str) -> list[tuple[str, str]]:
+    sources: list[tuple[str, str]] = []
+    current_path: str | None = None
+    content: list[str] = []
+    in_hunk = False
+
+    def flush() -> None:
+        nonlocal current_path, content
+        if current_path is not None:
+            sources.append((current_path, "\n".join(content) + "\n"))
+        current_path = None
+        content = []
+
+    lines = diff.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith("--- "):
+            flush()
+            in_hunk = False
+            old_path = line[4:].split("\t", 1)[0].strip()
+            if (
+                old_path == "/dev/null"
+                and index + 1 < len(lines)
+                and lines[index + 1].startswith("+++ ")
+            ):
+                current_path = _normalized_diff_path(
+                    lines[index + 1][4:].split("\t", 1)[0].strip()
+                )
+            continue
+        if current_path is None:
+            continue
+        if line.startswith("@@"):
+            in_hunk = True
+            continue
+        if in_hunk and line.startswith("+") and not line.startswith("+++ "):
+            content.append(line[1:])
+    flush()
+    return sources
 
 
 def repair_unified_diff(project: Path, diff: str) -> str:

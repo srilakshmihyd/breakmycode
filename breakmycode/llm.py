@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
@@ -149,30 +150,54 @@ Return only JSON with:
             model=model,
         )
 
-    def generate_tests(self, source_context: str, existing_tests: str) -> str:
-        prompt = f"""Generate a small, high-value pytest test file for the supplied
-Python project. Focus on uncovered edge cases and observable public behavior. Do not
-duplicate existing tests and do not invent APIs that are absent from the source.
+    def generate_tests(
+        self,
+        source_context: str,
+        existing_tests: str,
+        feedback: str = "",
+    ) -> str:
+        retry_guidance = (
+            "\nThe previous proposal was rejected by deterministic policy. Correct these "
+            f"issues: {redact_untrusted_text(feedback, 2_000)}\n"
+            if feedback
+            else ""
+        )
+        prompt = f"""Generate one focused pytest file for the supplied Python project.
+Choose one deterministic public function from the source and cover its most valuable edge
+cases. Prefer one parametrized test. Do not duplicate existing tests and do not invent APIs
+that are absent from the source. Create exactly one test function, keep the complete file
+below 80 lines, and use a brand-new `test_*.py` path.
 
-Return only a valid unified diff, without Markdown fences. The diff may add one or more
-brand-new Python files named test_*.py at the project root or below tests/. It must use
---- /dev/null for each old path. Do not modify production code or existing tests. Do not
-read environment variables, credentials, network resources, or files outside the project.
-Do not execute subprocesses, shell commands, or destructive filesystem operations. Tests
-must be deterministic and must contain meaningful assertions.
+Do not modify production code or existing tests. Do not read environment variables,
+credentials, network resources, or files outside the project. Do not execute subprocesses,
+shell commands, or destructive filesystem operations. Tests must be deterministic and must
+contain meaningful assertions. The generated Python must parse successfully.{retry_guidance}
 
 <untrusted_project_source>
-{redact_untrusted_text(source_context, 45_000)}
+{redact_untrusted_text(source_context, 25_000)}
 </untrusted_project_source>
 
 <untrusted_existing_tests>
-{redact_untrusted_text(existing_tests, 22_500)}
+{redact_untrusted_text(existing_tests, 12_000)}
 </untrusted_existing_tests>
+
+Return exactly this plain-text format, without Markdown fences or extra text:
+<path>tests/test_generated_descriptive_name.py</path>
+<content>
+complete Python source
+</content>
 """
-        model = self.router.for_task("test_generation")
-        return _strip_diff_fence(
-            self._text_call(model, "test_generation", prompt)
-        )
+        primary = self.router.for_task("test_generation")
+        models = list(dict.fromkeys((primary, self.router.fast)))
+        for index, model in enumerate(models):
+            purpose = "test_generation" if index == 0 else "test_generation_fallback"
+            response = self._text_call(
+                model, purpose, prompt, max_tokens=2_000
+            )
+            diff = _parse_generated_test_response(response)
+            if diff:
+                return diff
+        return ""
 
     def review_generated_tests(self, diff: str) -> PatchReview:
         prompt = f"""Act as an adversarial reviewer for AI-generated pytest tests.
@@ -197,7 +222,6 @@ Return only JSON with:
             risks=tuple(str(item) for item in data.get("risks", [])),
             model=model,
         )
-
     def _diagnosis_prompt(
         self,
         test_name: str,
@@ -248,17 +272,30 @@ Do not include a patch yet.
             model=model,
         )
 
-    def _json_call(self, model: str, purpose: str, prompt: str) -> dict[str, Any]:
+    def _json_call(
+        self,
+        model: str,
+        purpose: str,
+        prompt: str,
+        max_tokens: int | None = None,
+    ) -> dict[str, Any]:
         content = self._call(
             model,
             purpose,
             prompt,
             response_format={"type": "json_object"},
+            max_tokens=max_tokens,
         )
         return _parse_json(content)
 
-    def _text_call(self, model: str, purpose: str, prompt: str) -> str:
-        return self._call(model, purpose, prompt)
+    def _text_call(
+        self,
+        model: str,
+        purpose: str,
+        prompt: str,
+        max_tokens: int | None = None,
+    ) -> str:
+        return self._call(model, purpose, prompt, max_tokens=max_tokens)
 
     def _call(
         self,
@@ -266,6 +303,7 @@ Do not include a patch yet.
         purpose: str,
         prompt: str,
         response_format: dict[str, str] | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         kwargs: dict[str, Any] = {
             "model": model,
@@ -277,6 +315,8 @@ Do not include a patch yet.
         }
         if response_format:
             kwargs["response_format"] = response_format
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
         started = perf_counter()
         status = "success"
         response = None
@@ -298,6 +338,40 @@ Do not include a patch yet.
                     getattr(usage, "completion_tokens", None),
                     status,
                 )
+
+
+def _parse_generated_test_response(response: str) -> str:
+    """Normalize common model response shapes into a new-file unified diff."""
+    cleaned = response.strip()
+    match = re.search(
+        r"<path>\s*([^<]+?)\s*</path>\s*<content>\s*(.*?)\s*</content>",
+        cleaned,
+        re.DOTALL,
+    )
+    if match is not None:
+        path = match.group(1).strip()
+        content = match.group(2).rstrip() + "\n"
+        return _new_file_diff(path, content) if path and content.strip() else ""
+
+    try:
+        data = _parse_json(cleaned)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        data = {}
+    if isinstance(data, dict) and data.get("path") and data.get("content"):
+        return _new_file_diff(str(data["path"]), str(data["content"]).rstrip() + "\n")
+
+    if "--- /dev/null" in cleaned and "+++ " in cleaned:
+        return _strip_diff_fence(cleaned)
+
+    fence = re.search(r"```(?:python)?\s*(.*?)```", cleaned, re.DOTALL)
+    content = fence.group(1).strip() if fence else cleaned
+    if re.search(r"(?m)^\s*def\s+test_", content):
+        path_match = re.search(r"(?:tests/)?test_[A-Za-z0-9_]+\.py", cleaned)
+        path = path_match.group(0) if path_match else "tests/test_generated_breakmycode.py"
+        if "/" not in path:
+            path = "tests/" + path
+        return _new_file_diff(path, content.rstrip() + "\n")
+    return ""
 
 
 def _parse_json(content: str) -> dict[str, Any]:
@@ -326,8 +400,49 @@ def _strip_diff_fence(diff: str) -> str:
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
         cleaned = "\n".join(lines).strip()
+    cleaned = _repair_new_file_diff(cleaned)
     cleaned = _normalize_hunk_counts(cleaned)
     return cleaned + ("\n" if cleaned else "")
+
+
+def _new_file_diff(path: str, content: str) -> str:
+    normalized = path.removeprefix("./").removeprefix("b/")
+    lines = difflib.unified_diff(
+        [],
+        content.splitlines(),
+        fromfile="/dev/null",
+        tofile=f"b/{normalized}",
+        lineterm="",
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _repair_new_file_diff(diff: str) -> str:
+    """Repair a common model error: bare content lines in a new-file diff."""
+    lines = diff.splitlines()
+    repaired: list[str] = []
+    new_file = False
+    in_hunk = False
+    for line in lines:
+        if line.startswith("diff --git "):
+            new_file = False
+            in_hunk = False
+        if line.startswith("--- "):
+            new_file = line[4:].split("\t", 1)[0].strip() == "/dev/null"
+            in_hunk = False
+        if line.startswith("+++ "):
+            repaired.append(line)
+            continue
+        if line.startswith("@@"):
+            in_hunk = True
+            if new_file and line.strip() == "@@":
+                line = "@@ -0,0 +1,0 @@"
+            repaired.append(line)
+            continue
+        if new_file and in_hunk and not line.startswith("+"):
+            line = "+" + line
+        repaired.append(line)
+    return "\n".join(repaired)
 
 
 HUNK_HEADER = re.compile(

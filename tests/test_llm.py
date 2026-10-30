@@ -1,7 +1,11 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from breakmycode.llm import LLMAnalyzer, _strip_diff_fence
+from breakmycode.llm import (
+    LLMAnalyzer,
+    _parse_generated_test_response,
+    _strip_diff_fence,
+)
 
 
 def _response(content):
@@ -60,8 +64,8 @@ def test_model_diff_hunk_counts_are_normalized():
 def test_mocked_llm_generates_new_pytest_file():
     client = Mock()
     client.chat.completions.create.return_value = _response(
-        "--- /dev/null\n+++ b/tests/test_generated_cart.py\n"
-        "@@ -0,0 +1,2 @@\n+def test_total():\n+    assert 1 + 1 == 2\n"
+        "<path>tests/test_generated_cart.py</path>\n"
+        "<content>\ndef test_total():\n    assert 1 + 1 == 2\n</content>"
     )
     analyzer = LLMAnalyzer(client=client, model="mock-model")
 
@@ -72,6 +76,47 @@ def test_mocked_llm_generates_new_pytest_file():
 
     assert "+++ b/tests/test_generated_cart.py" in diff
     prompt = client.chat.completions.create.call_args.kwargs["messages"][1]["content"]
-    assert "brand-new Python files" in prompt
+    assert "brand-new `test_*.py`" in prompt
     assert "def total" in prompt
+
+
+def test_bare_new_file_diff_lines_are_repaired():
+    malformed = """--- /dev/null
++++ tests/test_generated.py
+@@
+def test_generated():
+    assert True
+"""
+
+    normalized = _strip_diff_fence(malformed)
+
+    assert "@@ -0,0 +1,2 @@" in normalized
+    assert "+def test_generated():" in normalized
+    assert "+    assert True" in normalized
+
+
+def test_generated_test_json_response_is_normalized():
+    response = (
+        '{"path":"tests/test_generated_json.py",'
+        '"content":"def test_json():\\n    assert True\\n"}'
+    )
+
+    diff = _parse_generated_test_response(response)
+
+    assert "+++ b/tests/test_generated_json.py" in diff
+    assert "+    assert True" in diff
+
+
+def test_generated_test_python_fence_is_normalized():
+    response = """Here is tests/test_generated_fence.py:
+```python
+def test_fence():
+    assert True
+```
+"""
+
+    diff = _parse_generated_test_response(response)
+
+    assert "+++ b/tests/test_generated_fence.py" in diff
+    assert "+def test_fence():" in diff
 

@@ -26,6 +26,14 @@ class PatchApplier:
         self.branch_name: str | None = None
 
     def apply(self, diff: str, *, patch_kind: str = "code") -> str:
+        diff = self.validate(diff, patch_kind=patch_kind)
+        if self.branch_name is None:
+            self.branch_name = self._create_branch()
+        self._git("apply", "--unidiff-zero", "-", input_text=diff)
+        return self.branch_name
+
+    def validate(self, diff: str, *, patch_kind: str = "code") -> str:
+        """Validate policy and Git applicability without modifying the project."""
         if not diff.strip():
             raise PatchError("The model returned an empty patch.")
         diff = repair_unified_diff(self.project, diff)
@@ -46,10 +54,7 @@ class PatchApplier:
 
         # Validate before changing branches or files.
         self._git("apply", "--check", "--unidiff-zero", "-", input_text=diff)
-        if self.branch_name is None:
-            self.branch_name = self._create_branch()
-        self._git("apply", "--unidiff-zero", "-", input_text=diff)
-        return self.branch_name
+        return diff
 
     def _create_branch(self) -> str:
         stem = datetime.now().strftime("breakmycode/fixes-%Y%m%d-%H%M%S")

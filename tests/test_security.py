@@ -101,3 +101,33 @@ def test_generated_tests_block_shell_network_and_environment_access(tmp_path):
     assert report.safe is False
     assert {"network_access", "environment_access"}.issubset(rules)
 
+
+def test_generated_tests_must_be_valid_python(tmp_path):
+    diff = """--- /dev/null
++++ b/tests/test_generated_invalid.py
+@@ -0,0 +1,2 @@
++def test_broken(:
++    assert True
+"""
+
+    report = review_test_patch(tmp_path, diff)
+
+    assert report.safe is False
+    assert "invalid_python" in {item.rule for item in report.findings}
+
+
+def test_generated_tests_are_bounded(tmp_path):
+    functions = "\n".join(
+        f"def test_case_{index}():\n    assert True" for index in range(6)
+    )
+    added = "\n".join("+" + line for line in functions.splitlines())
+    diff = (
+        "--- /dev/null\n+++ b/tests/test_generated_many.py\n"
+        f"@@ -0,0 +1,12 @@\n{added}\n"
+    )
+
+    report = review_test_patch(tmp_path, diff)
+
+    assert report.safe is False
+    assert "generated_test_count" in {item.rule for item in report.findings}
+

@@ -38,6 +38,10 @@ def test_declined_generated_tests_are_not_applied(tmp_path, monkeypatch):
             {"test_cart.py::test_existing": "passed"}
         ),
     )
+    monkeypatch.setattr(
+        "breakmycode.generator.TestGenerationWorkflow._preflight_generated_tests",
+        lambda self, diff: None,
+    )
     workflow = GenerationWorkflow(
         project,
         _analyzer(),
@@ -73,6 +77,10 @@ def test_approved_generated_tests_are_verified(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "breakmycode.generator.run_pytest_once",
         lambda project, timeout_seconds: next(runs),
+    )
+    monkeypatch.setattr(
+        "breakmycode.generator.TestGenerationWorkflow._preflight_generated_tests",
+        lambda self, diff: None,
     )
     workflow = GenerationWorkflow(
         project,
