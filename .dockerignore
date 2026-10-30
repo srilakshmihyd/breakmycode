@@ -1,0 +1,16 @@
+.env
+.git
+.venv
+venv
+__pycache__
+.pytest_cache
+.mypy_cache
+*.pyc
+*.pyo
+*.egg-info
+build
+dist
+eval-report.json
+job-source.tar.gz
+*.db
+.DS_Store

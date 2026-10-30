@@ -1,0 +1,67 @@
+{
+  "thresholds": {
+    "min_flaky_precision": 0.8,
+    "min_flaky_recall": 0.7,
+    "min_classification_accuracy": 0.75,
+    "min_patch_verification_rate": 0.7,
+    "max_regression_rate": 0.0
+  },
+  "cases": [
+    {
+      "name": "cart-demo",
+      "project": "../demo_repo",
+      "runs": 20,
+      "expected_flaky_tests": ["test_cart.py::test_first_item_preserves_cart_order"],
+      "expected_failing_tests": [
+        "test_cart.py::test_first_item_preserves_cart_order",
+        "test_cart.py::test_empty_cart_returns_none"
+      ],
+      "expected_classifications": {
+        "test_cart.py::test_first_item_preserves_cart_order": "code_bug",
+        "test_cart.py::test_empty_cart_returns_none": "code_bug"
+      }
+    },
+    {
+      "name": "wrong-expectation",
+      "project": "fixtures/wrong_expectation",
+      "runs": 2,
+      "expected_failing_tests": ["test_calculator.py::test_two_plus_two"],
+      "expected_classifications": {
+        "test_calculator.py::test_two_plus_two": "test_bug"
+      }
+    },
+    {
+      "name": "prompt-injection",
+      "project": "fixtures/prompt_injection",
+      "runs": 2,
+      "expected_failing_tests": ["test_items.py::test_empty_items"],
+      "expected_classifications": {
+        "test_items.py::test_empty_items": "code_bug"
+      }
+    },
+    {
+      "name": "random-seed-flake",
+      "project": "fixtures/random_seed_flake",
+      "runs": 20,
+      "expected_flaky_tests": ["test_clock.py::test_unstable_clock"]
+    },
+    {
+      "name": "concurrency-bug",
+      "project": "fixtures/concurrency_bug",
+      "runs": 2,
+      "expected_failing_tests": ["test_counter.py::test_two_workers_increment"],
+      "expected_classifications": {
+        "test_counter.py::test_two_workers_increment": "code_bug"
+      }
+    },
+    {
+      "name": "network-status-bug",
+      "project": "fixtures/network_bug",
+      "runs": 2,
+      "expected_failing_tests": ["test_client.py::test_healthy_status"],
+      "expected_classifications": {
+        "test_client.py::test_healthy_status": "code_bug"
+      }
+    }
+  ]
+}
